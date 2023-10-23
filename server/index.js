@@ -93,7 +93,7 @@ app.post('/login', async (req, res) => {
         const newUser = user.rows[0]
         bcrypt.compare(password, newUser.password).then(function (result) {
             if (result) {
-                const token = jwt.sign({ user: { id: user._id } }, process.env.SECRET);
+                const token = jwt.sign({ id: newUser.id }, process.env.SECRET);
                 return res.json({ success: true, authToken: token })
             } else {
                 return res.status(400).json({ success: false, error: "Email or Password is incorrect!" })
@@ -128,9 +128,9 @@ app.put('/reset', async (req, res) => {
 
 app.post('/donor', async (req, res) => {
     try {
-        const { donor_name, mobile_no, blood_group, previous_donation_date, address } = req.body
-        const newDonor = await pool.query('INSERT INTO "donor" (donor_name, mobile_no, blood_group, previous_donation_date, address) VALUES($1, $2, $3, $4, $5) RETURNING *',
-            [donor_name, mobile_no, blood_group, previous_donation_date, address]
+        const { donor_name, mobile_no, blood_group, previous_donation_date, address, camp_id, user_id } = req.body
+        const newDonor = await pool.query('INSERT INTO "donor" (donor_name, mobile_no, blood_group, previous_donation_date, address, camp_id, user_id) VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+            [donor_name, mobile_no, blood_group, previous_donation_date, address, camp_id, user_id]
         )
         res.json({ success: true, donor: newDonor.rows[0] })
     } catch (err) {
@@ -184,7 +184,7 @@ app.get('/donor/:id', async (req, res) => {
     }
 })
 
-app.get('/count', async (req, res) => {
+app.get('/count-donor', async (req, res) => {
     try {
         const count = await pool.query('SELECT COUNT(id) FROM "donor"')
         res.json({ success: true, count: count.rows[0] })
@@ -192,6 +192,101 @@ app.get('/count', async (req, res) => {
         res.json({ success: false, error: err.message })
     }
 })
+
+app.get('/count-user', async (req, res) => {
+    try {
+        const count = await pool.query('SELECT COUNT(id) FROM "user"')
+        res.json({ success: true, count: count.rows[0] })
+    } catch (err) {
+        res.json({ success: false, error: err.message })
+    }
+})
+
+app.put('/donor/approve/:donorId', async (req, res) => {
+    const adminUserId = req.user.id; 
+    const donorId = req.params.donorId;
+    
+    try {
+        const isAdminQuery = await pool.query('SELECT is_admin FROM "user" WHERE id = $1', [adminUserId]);
+        const isAdmin = isAdminQuery.rows[0].is_admin;
+        
+        if (!isAdmin) {
+            return res.status(403).json({ success: false, message: 'Access denied. User is not an admin.' });
+        }
+
+        const updateDonorQuery = await pool.query('UPDATE "donor" SET approval = true WHERE id = $1', [donorId]);
+        if (updateDonorQuery.rowCount === 1) {
+            return res.json({ success: true, message: 'Donor approval updated successfully.' });
+        } else {
+            return res.status(404).json({ success: false, message: 'Donor not found.' });
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/account/requested-blood-status', async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const requestedBloodStatus = await pool.query('SELECT * FROM "request" WHERE user_id = $1', [userId]);
+        res.json({ success: true, requestedBloodStatus: requestedBloodStatus.rows });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/account/request-history', async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const requestHistory = await pool.query('SELECT * FROM "donor" WHERE user_id = $1', [userId]);
+        res.json({ success: true, requestHistory: requestHistory.rows });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.get('/admin/pending-requests', async (req, res) => {
+    try {
+        const pendingRequests = await pool.query('SELECT * FROM "request" WHERE approval = false');
+        res.json({ success: true, pendingRequests: pendingRequests.rows });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+
+app.put('/admin/approve-reject-request/:requestId', async (req, res) => {
+    try {
+        const { requestId } = req.params;
+        const { approval, comment } = req.body;
+
+        const updateRequest = await pool.query('UPDATE "request" SET approval = $1, comment = $2 WHERE id = $3', [approval, comment, requestId]);
+
+        if (updateRequest.rowCount === 1) {
+            res.json({ success: true, message: 'Request updated successfully.' });
+        } else {
+            res.status(404).json({ success: false, message: 'Request not found.' });
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+
+app.get('/admin/request-history', async (req, res) => {
+    try {
+        const requestHistory = await pool.query('SELECT * FROM "donor"');
+        res.json({ success: true, requestHistory: requestHistory.rows });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
 
 
 app.listen(5000, () => {
