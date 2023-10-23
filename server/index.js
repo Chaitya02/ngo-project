@@ -3,6 +3,8 @@ const cors = require('cors')
 const pool = require('./db')
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 require('dotenv').config()
 
 const app = express()
@@ -12,26 +14,75 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
+const transporter = nodemailer.createTransport({
+    service: process.env.SERVICE,
+    host: process.env.HOST,
+    port: 465,
+    secure: true,
+    auth: {
+        user: process.env.EUSER,
+        pass: process.env.PASS,
+    },
+});
+
+function generateVerificationCode() {
+    return crypto.randomBytes(3).toString('hex').toUpperCase();
+}
+
 
 // Routes
 
 app.post('/signup', async (req, res) => {
     try {
-        const { name, email, mobile_no } = req.body
+        const { name, email, mobile_no, is_admin, address, pin, state, dob, blood_group } = req.body
+        const verificationCode = generateVerificationCode();
         bcrypt.hash(req.body.password, 10, async function (err, hash) {
             if (err) {
                 res.json({ success: false, error: err.message })
             } else {
-                const newUser = await pool.query('INSERT INTO "user" (name, email, password, mobile_no) VALUES($1, $2, $3, $4) RETURNING *',
-                    [name, email, hash, mobile_no]
+                const newUser = await pool.query('INSERT INTO "user" (name, email, password, mobile_no, is_admin, address, pin, state, dob, blood_group) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *',
+                    [name, email, hash, mobile_no, is_admin, address, pin, state, dob, blood_group]
                 )
-                res.json({ success: true, user: newUser.rows[0] })
+
+                const mailOptions = {
+                    from: process.env.EUSER,
+                    to: email,
+                    subject: 'Verification Code - (NGO Website)',
+                    text: `Your verification code is: ${verificationCode}`,
+                };
+
+                const emailResult = await transporter.sendMail(mailOptions);
+
+                if (emailResult.accepted.length > 0) {
+                    res.json({ success: true, user: newUser.rows[0], verificationCode: verificationCode });
+                } else {
+                    res.json({ success: false, error: 'Failed to send verification code via email' });
+                }
             }
         })
     } catch (err) {
         res.json({ success: false, error: err.message })
     }
 })
+
+app.post('/verify-email', async (req, res) => {
+    try {
+        const { email, code, verificationCode } = req.body;
+
+        if (verificationCode === code) {
+            const result = await pool.query('UPDATE "user" SET verified = true WHERE email = $1', [email]);
+            if (result.rowCount === 1) {
+                res.json({ success: true, message: 'Email verification successful' });
+            } else {
+                res.json({ success: false, error: 'Email verification failed' });
+            }
+        } else {
+            res.json({ success: false, error: 'Invalid verification code' });
+        }
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
+});
 
 app.post('/login', async (req, res) => {
     try {
