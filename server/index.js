@@ -94,7 +94,7 @@ app.post('/login', async (req, res) => {
         bcrypt.compare(password, newUser.password).then(function (result) {
             if (result) {
                 const token = jwt.sign({ id: newUser.id }, process.env.SECRET);
-                return res.json({ success: true, authToken: token })
+                return res.json({ success: true, authToken: token, user_id: newUser.id })
             } else {
                 return res.status(400).json({ success: false, error: "Email or Password is incorrect!" })
             }
@@ -203,13 +203,13 @@ app.get('/count-user', async (req, res) => {
 })
 
 app.put('/donor/approve/:donorId', async (req, res) => {
-    const adminUserId = req.user.id; 
+    const adminUserId = req.user.id;
     const donorId = req.params.donorId;
-    
+
     try {
         const isAdminQuery = await pool.query('SELECT is_admin FROM "user" WHERE id = $1', [adminUserId]);
         const isAdmin = isAdminQuery.rows[0].is_admin;
-        
+
         if (!isAdmin) {
             return res.status(403).json({ success: false, message: 'Access denied. User is not an admin.' });
         }
@@ -226,7 +226,19 @@ app.put('/donor/approve/:donorId', async (req, res) => {
     }
 });
 
-app.get('/account/requested-blood-status', async (req, res) => {
+app.post('/request', async (req, res) => {
+    try {
+        const { first_name, last_name, dob, mobile_no, address, state, pin, blood_group, comment, user_id } = req.body
+        const newDonor = await pool.query('INSERT INTO "request" (first_name, last_name, dob, mobile_no,address,state,pin,blood_group, comment,user_id) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING * ',
+            [first_name, last_name, dob, mobile_no, address, state, pin, blood_group, comment, user_id]
+        )
+        res.json({ success: true, request: newDonor.rows[0] })
+    } catch (err) {
+        res.json({ success: false, error: err.message })
+    }
+})
+
+app.get('/user/requested-blood-status', async (req, res) => {
     try {
         const userId = req.user.id;
         const requestedBloodStatus = await pool.query('SELECT * FROM "request" WHERE user_id = $1', [userId]);
@@ -237,7 +249,7 @@ app.get('/account/requested-blood-status', async (req, res) => {
     }
 });
 
-app.get('/account/request-history', async (req, res) => {
+app.get('/user/request-history', async (req, res) => {
     try {
         const userId = req.user.id;
         const requestHistory = await pool.query('SELECT * FROM "donor" WHERE user_id = $1', [userId]);
